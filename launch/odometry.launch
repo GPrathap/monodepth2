@@ -1,0 +1,25 @@
+
+<launch>
+<!-- <node pkg="geodetic_utils" type="geodetic_to_local_conversion_node"
+                name="geodetic_to_local_conversion_node" output="screen">
+      <remap from="gps" to="/kitti/oxts/gps/fix"/>
+      <remap from="imu" to="/kitti/oxts/imu"/>
+      <remap from="vel" to="/kitti/oxts/gps/vel"/>
+      <remap from="odometry" to="/dji_sdk/odometry"/>
+  </node> -->
+
+  <node pkg="octomap_server" type="octomap_server_node" name="octomap_server">
+                <param name="resolution" value="0.2" />
+                <param name="frame_id" type="string" value="velo_link" />
+                <!-- <param name="sensor_model/hit" value="0.6" />
+                <param name="sensor_model/miss" value="0.4" />
+                <param name="sensor_model/min_range" value="0.3" /> -->
+                <param name="sensor_model/max_range" value="8.0" />
+                <!-- <param name="occupancy_min_z" value="0.0" />
+                <param name="occupancy_max_z" value="8.0" />
+                <param name="pointcloud_min_z" value="0.0" />
+                <param name="pointcloud_max_z" value="8.0" /> -->
+                <!-- <remap from="cloud_in" to="/d400/depth/color/points" /> -->
+                <remap from="cloud_in" to="/depth/point_cloud_left" />
+  </node>
+</launch>
