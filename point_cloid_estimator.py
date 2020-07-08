@@ -83,7 +83,7 @@ class PointCloudEstimator:
         self.encoder.to(self.device)
         self.encoder.eval()
 
-        print("   Loading pretrained decoder")
+        print("Loading pretrained decoder")
         self.depth_decoder = networks.DepthDecoder(num_ch_enc=self.encoder.num_ch_enc, scales=range(4))
 
         loaded_dict = torch.load(depth_decoder_path, map_location=self.device)
