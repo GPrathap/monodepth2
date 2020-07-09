@@ -10,9 +10,10 @@ import argparse as ap
 import collections
 import time
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
-
+from tqdm import tqdm
 from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
 
+import argparse
 import tf
 import tf2_ros
 import tf2_py as tf2
@@ -45,6 +46,7 @@ import std_msgs.msg as std_msgs
 import std_msgs.msg
 
 import ros_numpy
+from saliency import BackPropagation
 
 buffer = collections.deque(maxlen=5)
 
@@ -91,51 +93,120 @@ class PointCloudEstimator:
 
         self.depth_decoder.to(self.device)
         self.depth_decoder.eval()
+        
+        depth_model = (self.encoder, self.depth_decoder)
+        self.bp = BackPropagation(model=depth_model, task="depth")
+        self.args = {}
+        self.args["height"] = self.feed_height
+        self.args["width"] = self.feed_width
+        self.args["sample_rate"] = 10
+        # self.args[""]
+        
+
+    
+
+    def largest_radius(self, saliency_map, pos_i, pos_j, threshold=0.2):
+        height, width = saliency_map.shape
+
+        act_pixel_pos = np.where(saliency_map >= threshold)
+        all_dist = np.zeros(act_pixel_pos[0].shape[0])
+
+        if act_pixel_pos[0].shape[0] == 0:
+            return 0, 0
+        for i in range(act_pixel_pos[0].shape[0]):
+            all_dist[i] = np.sqrt((act_pixel_pos[0][i]-pos_i) ** 2 + (act_pixel_pos[1][i]-pos_j) ** 2)
+        radius = np.max(all_dist) / np.sqrt(height ** 2 + width ** 2)
+        part = act_pixel_pos[0].shape[0] / (height * width)
+        return radius, part
+
+    def calculate(self, image, args):
+        pred_idx = self.bp.forward(image)  # predict lbl / depth: [h, w]
+
+        img_radius1, img_radius2, img_radius3 = [], [], []
+        img_part1, img_part2, img_part3 = [], [], []
+
+        y1, y2 = int(0.40810811 * args["height"]), int(0.99189189 * args["height"])
+        x1, x2 = int(0.03594771 * args["width"]), int(0.96405229 * args["width"])
+        total_pixel = 0
+
+        for pos_i in tqdm(range(y1+args["sample_rate"], y2, args["sample_rate"])):
+            for pos_j in tqdm(range(x1+args["sample_rate"], x2, args["sample_rate"])):
+                self.bp.backward(pos_i=pos_i, pos_j=pos_j, idx=pred_idx[pos_i, pos_j])
+                output_vanilla, output_saliency = self.bp.generate()  # output_saliency: [h, w]
+
+                output_saliency = output_saliency[y1:y2, x1:x2]
+                # normalized saliency map for a pixel in an image
+                if np.max(output_saliency) > 0:
+                    output_saliency = (output_saliency - np.min(output_saliency)) / np.max(output_saliency)
+                radius1, part1 = self.largest_radius(output_saliency, pos_i=pos_i-y1, pos_j=pos_j-x1, threshold=0.1)
+                radius2, part2 = self.largest_radius(output_saliency, pos_i=pos_i-y1, pos_j=pos_j-x1, threshold=0.5)
+                radius3, part3 = self.largest_radius(output_saliency, pos_i=pos_i-y1, pos_j=pos_j-x1, threshold=0.9)
+
+                img_radius1.append(radius1)
+                img_radius2.append(radius2)
+                img_radius3.append(radius3)
+                img_part1.append(part1)
+                img_part2.append(part2)
+                img_part3.append(part3)
+                total_pixel += 1
+
+        return img_radius1, img_radius2, img_radius3, img_part1, img_part2, img_part3
 
 
     def depth_map_estimation(self, input_image, is_scaled):
         # PREDICTING ON EACH IMAGE IN TURN
-        with torch.no_grad():
+        # with torch.no_grad():
             # Load image and preprocess
             # input_image = pil.open(image_path).convert('RGB')
-            input_image = pil.fromarray(input_image)
-            original_width, original_height = input_image.size
-            input_image = input_image.resize((self.feed_width, self.feed_height), pil.LANCZOS)
-            input_image = transforms.ToTensor()(input_image).unsqueeze(0)
+        input_image = pil.fromarray(input_image)
+        original_width, original_height = input_image.size
+        input_image = input_image.resize((self.feed_width, self.feed_height), pil.LANCZOS)
+        input_image = transforms.ToTensor()(input_image).unsqueeze(0)
 
-            # PREDICTION
-            input_image = input_image.to(self.device)
-            features = self.encoder(input_image)
-            outputs = self.depth_decoder(features)
+        # PREDICTION
+        input_image = input_image.to(self.device)
+        features = self.encoder(input_image)
+        
+        # features[0].backward()
 
-            disp = outputs[("disp", 0)]
-            disp_resized = torch.nn.functional.interpolate(
-                disp, (original_height, original_width), mode="bilinear", align_corners=False)
 
-            # # Saving numpy file
-            # output_name = os.path.splitext(os.path.basename(self.image_path))[0]
-            # name_dest_npy = os.path.join(output_directory, "{}_disp.npy".format(output_name))
-            if(is_scaled):
-                scaled_disp, _ = disp_to_depth_scaled(disp, 0.1, 100, 4.4)
-            else:
-                scaled_disp, _ = disp_to_depth(disp, 0.1, 100)
-            # np.save(name_dest_npy, scaled_disp.cpu().numpy())
+        outputs = self.depth_decoder(features)
+        # print(features)
+        # for param in  outputs[("disp", 0)].parameters():
+        #     print(param.requires_grad)
+        # outputs[("disp", 0)].backward()
+        # x_train_tensor = torch.from_numpy(np.array(features))
 
-            # Saving colormapped depth image
-            disp_resized_np = scaled_disp.squeeze().cpu().numpy()
-            vmax = np.percentile(disp_resized_np, 95)
-            normalizer = mpl.colors.Normalize(vmin=disp_resized_np.min(), vmax=vmax)
-            mapper = cm.ScalarMappable(norm=normalizer, cmap='magma')
-            colormapped_im = (mapper.to_rgba(disp_resized_np)[:, :, :3] * 255).astype(np.uint8)
-            print('-> Done!')
-            im = pil.fromarray(colormapped_im)
-            return colormapped_im, disp_resized_np
+        self.calculate(input_image, self.args)
 
-            # name_dest_im = os.path.join(output_directory, "{}_disp.jpeg".format(output_name))
-            # im.save(name_dest_im)
+        disp = outputs
+        # disp_resized = torch.nn.functional.interpolate(
+        #     disp, (original_height, original_width), mode="bilinear", align_corners=False)
 
-            # print("   Processed {:d} of {:d} images - saved prediction to {}".format(
-            #     idx + 1, len(paths), name_dest_im))
+        # # Saving numpy file
+        # output_name = os.path.splitext(os.path.basename(self.image_path))[0]
+        # name_dest_npy = os.path.join(output_directory, "{}_disp.npy".format(output_name))
+        if(is_scaled):
+            scaled_disp, _ = disp_to_depth_scaled(disp, 0.1, 100, 4.4)
+        else:
+            scaled_disp, _ = disp_to_depth(disp, 0.1, 100)
+        # np.save(name_dest_npy, scaled_disp.cpu().numpy())
+
+        # Saving colormapped depth image
+        disp_resized_np = scaled_disp.squeeze().cpu().detach().numpy()
+        vmax = np.percentile(disp_resized_np, 95)
+        normalizer = mpl.colors.Normalize(vmin=disp_resized_np.min(), vmax=vmax)
+        mapper = cm.ScalarMappable(norm=normalizer, cmap='magma')
+        colormapped_im = (mapper.to_rgba(disp_resized_np)[:, :, :3] * 255).astype(np.uint8)
+        print('-> Done!')
+        im = pil.fromarray(colormapped_im)
+        return colormapped_im, disp_resized_np
+
+        # name_dest_im = os.path.join(output_directory, "{}_disp.jpeg".format(output_name))
+        # im.save(name_dest_im)
+
+        # print("   Processed {:d} of {:d} images - saved prediction to {}".format(
+        #     idx + 1, len(paths), name_dest_im))
 
             
     def xyz_array_to_pointcloud2(self, points, stamp=None, frame_id=None):
@@ -271,6 +342,8 @@ if __name__ == '__main__':
     tf_listener = tf2_ros.TransformListener(tf_buffer)
 
     point_cloud_estimator = PointCloudEstimator()
+
+  
     
     image_sub_left = message_filters.Subscriber('/kitti/camera_color_left/image_raw', Image)
     info_sub_left = message_filters.Subscriber('/kitti/camera_color_left/camera_info', CameraInfo)
