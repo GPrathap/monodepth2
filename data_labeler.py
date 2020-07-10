@@ -147,6 +147,6 @@ class DataLabeler:
 
 
 if __name__ == '__main__':
-    point_cloud_estimator = DataLabeler(labeled_data_dir="/home/geesara/dataset/")
-    point_cloud_estimator.label_data("/home/geesara/dataset/data")
+    point_cloud_estimator = DataLabeler(labeled_data_dir="/home/geesara/dataset/kitti/labeled/")
+    point_cloud_estimator.label_data("/home/geesara/dataset/kitti/data/")
     rospy.spin()
