@@ -23,7 +23,6 @@ class _PropagationBase(object):
         #         disp, (original_height, original_width), mode="bilinear", align_corners=False)
         # disp = np.array(disp)
         one_hot = torch.FloatTensor(self.preds.size()).zero_()
-
         one_hot[0][idx][pos_i][pos_j] = 1.0
         return one_hot.to(self.device)
 
@@ -50,7 +49,7 @@ class _PropagationBase(object):
 class BackPropagation(_PropagationBase):
     def generate(self):
         # produce vanilla bp map
-        print(self.image.grad)
+        # print(self.image.grad)
         image_grads_vanilla = self.image.grad.detach().cpu().numpy().copy()  # [1, 3, h, w]
         output_vanilla_bp = image_grads_vanilla.transpose(0,2,3,1)[0]
 

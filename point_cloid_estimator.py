@@ -47,6 +47,8 @@ import std_msgs.msg
 
 import ros_numpy
 from saliency import BackPropagation
+import uuid
+
 
 buffer = collections.deque(maxlen=5)
 
@@ -86,7 +88,7 @@ class PointCloudEstimator:
         self.encoder.eval()
 
         print("Loading pretrained decoder")
-        self.depth_decoder = networks.DepthDecoder(num_ch_enc=self.encoder.num_ch_enc, scales=range(4))
+        self.depth_decoder = networks.DepthDecoder(num_ch_enc=self.encoder.num_ch_enc, scales=range(4), is_scaled=True)
 
         loaded_dict = torch.load(depth_decoder_path, map_location=self.device)
         self.depth_decoder.load_state_dict(loaded_dict)
@@ -99,11 +101,8 @@ class PointCloudEstimator:
         self.args = {}
         self.args["height"] = self.feed_height
         self.args["width"] = self.feed_width
-        self.args["sample_rate"] = 10
+        self.args["sample_rate"] = 100
         # self.args[""]
-        
-
-    
 
     def largest_radius(self, saliency_map, pos_i, pos_j, threshold=0.2):
         height, width = saliency_map.shape
@@ -129,28 +128,39 @@ class PointCloudEstimator:
         x1, x2 = int(0.03594771 * args["width"]), int(0.96405229 * args["width"])
         total_pixel = 0
 
-        for pos_i in tqdm(range(y1+args["sample_rate"], y2, args["sample_rate"])):
-            for pos_j in tqdm(range(x1+args["sample_rate"], x2, args["sample_rate"])):
-                self.bp.backward(pos_i=pos_i, pos_j=pos_j, idx=pred_idx[pos_i, pos_j])
-                output_vanilla, output_saliency = self.bp.generate()  # output_saliency: [h, w]
-
-                output_saliency = output_saliency[y1:y2, x1:x2]
+        pos_i =  int(args["height"]/2.0)
+        pos_j = int(args["width"]/2.0)
+        # for pos_i in tqdm(range(y1+args["sample_rate"], y2, args["sample_rate"])):
+        #     for pos_j in tqdm(range(x1+args["sample_rate"], x2, args["sample_rate"])):
+        self.bp.backward(pos_i=pos_i, pos_j=pos_j, idx=pred_idx[pos_i, pos_j])
+        output_vanilla, output_saliency = self.bp.generate()  # output_saliency: [h, w]
+                
+                # output_saliency = output_vanilla
+                # print(output_vanilla)
+                # output_saliency = output_saliency[y1:y2, x1:x2]
                 # normalized saliency map for a pixel in an image
-                if np.max(output_saliency) > 0:
-                    output_saliency = (output_saliency - np.min(output_saliency)) / np.max(output_saliency)
-                radius1, part1 = self.largest_radius(output_saliency, pos_i=pos_i-y1, pos_j=pos_j-x1, threshold=0.1)
-                radius2, part2 = self.largest_radius(output_saliency, pos_i=pos_i-y1, pos_j=pos_j-x1, threshold=0.5)
-                radius3, part3 = self.largest_radius(output_saliency, pos_i=pos_i-y1, pos_j=pos_j-x1, threshold=0.9)
+                # if np.max(output_saliency) > 0:
+                #     output_saliency = (output_saliency - np.min(output_saliency)) / np.max(output_saliency)
+                # radius1, part1 = self.largest_radius(output_saliency, pos_i=pos_i-y1, pos_j=pos_j-x1, threshold=0.1)
+                # radius2, part2 = self.largest_radius(output_saliency, pos_i=pos_i-y1, pos_j=pos_j-x1, threshold=0.5)
+                # radius3, part3 = self.largest_radius(output_saliency, pos_i=pos_i-y1, pos_j=pos_j-x1, threshold=0.9)
 
-                img_radius1.append(radius1)
-                img_radius2.append(radius2)
-                img_radius3.append(radius3)
-                img_part1.append(part1)
-                img_part2.append(part2)
-                img_part3.append(part3)
-                total_pixel += 1
+                # img_radius1.append(radius1)
+                # img_radius2.append(radius2)
+                # img_radius3.append(radius3)
+                # img_part1.append(part1)
+                # img_part2.append(part2)
+                # img_part3.append(part3)
+                # total_pixel += 1
+        
 
-        return img_radius1, img_radius2, img_radius3, img_part1, img_part2, img_part3
+        disp_resized_np = output_saliency
+        vmax = np.percentile(disp_resized_np, 95)
+        normalizer = mpl.colors.Normalize(vmin=disp_resized_np.min(), vmax=vmax)
+        mapper = cm.ScalarMappable(norm=normalizer, cmap='magma')
+        colormapped_im = (mapper.to_rgba(disp_resized_np)[:, :, :3] * 255).astype(np.uint8)
+
+        return colormapped_im
 
 
     def depth_map_estimation(self, input_image, is_scaled):
@@ -158,49 +168,38 @@ class PointCloudEstimator:
         # with torch.no_grad():
             # Load image and preprocess
             # input_image = pil.open(image_path).convert('RGB')
+        image_id = str(uuid.uuid4())[0:20]
         input_image = pil.fromarray(input_image)
         original_width, original_height = input_image.size
         input_image = input_image.resize((self.feed_width, self.feed_height), pil.LANCZOS)
+        
+        cv2.imwrite('/home/geesara/dataset/img/'+ image_id +'.png', cv2.cvtColor(np.array(input_image), cv2.COLOR_RGB2BGR))    
+
         input_image = transforms.ToTensor()(input_image).unsqueeze(0)
 
         # PREDICTION
         input_image = input_image.to(self.device)
         features = self.encoder(input_image)
-        
-        # features[0].backward()
-
 
         outputs = self.depth_decoder(features)
-        # print(features)
-        # for param in  outputs[("disp", 0)].parameters():
-        #     print(param.requires_grad)
-        # outputs[("disp", 0)].backward()
-        # x_train_tensor = torch.from_numpy(np.array(features))
-
-        self.calculate(input_image, self.args)
-
+        
+        # gradient = self.calculate(input_image, self.args)
         disp = outputs
-        # disp_resized = torch.nn.functional.interpolate(
-        #     disp, (original_height, original_width), mode="bilinear", align_corners=False)
-
-        # # Saving numpy file
-        # output_name = os.path.splitext(os.path.basename(self.image_path))[0]
-        # name_dest_npy = os.path.join(output_directory, "{}_disp.npy".format(output_name))
-        if(is_scaled):
-            scaled_disp, _ = disp_to_depth_scaled(disp, 0.1, 100, 4.4)
-        else:
-            scaled_disp, _ = disp_to_depth(disp, 0.1, 100)
-        # np.save(name_dest_npy, scaled_disp.cpu().numpy())
-
+        # print(img_part1)
+        # print(img_part2)
+        # print(img_part3)
+        # print(img_radius1)
         # Saving colormapped depth image
-        disp_resized_np = scaled_disp.squeeze().cpu().detach().numpy()
-        vmax = np.percentile(disp_resized_np, 95)
-        normalizer = mpl.colors.Normalize(vmin=disp_resized_np.min(), vmax=vmax)
-        mapper = cm.ScalarMappable(norm=normalizer, cmap='magma')
-        colormapped_im = (mapper.to_rgba(disp_resized_np)[:, :, :3] * 255).astype(np.uint8)
-        print('-> Done!')
-        im = pil.fromarray(colormapped_im)
-        return colormapped_im, disp_resized_np
+        disp_resized_np = disp.squeeze().cpu().detach().numpy()
+        color_depth = self.get_color_image(disp_resized_np)
+        cv2.imwrite('/home/geesara/dataset/depth/'+ image_id +'.png', cv2.cvtColor(np.array(color_depth), cv2.COLOR_RGB2BGR))
+        # print(disp_resized_np.max())
+        disp_resized_np_low = np.where(disp_resized_np > disp_resized_np.max()/8.0, disp_resized_np, 0)
+        disp_resized_np_high = np.where(disp_resized_np < disp_resized_np.max()/8.0, disp_resized_np, 0)
+        disp_resized_np_high_save = np.where(disp_resized_np < disp_resized_np.max()/8.0, 255, 0)
+        cv2.imwrite('/home/geesara/dataset/mask/'+ image_id +'.png', disp_resized_np_high_save)
+        
+        return self.get_color_image(disp_resized_np_low), disp_resized_np, self.get_color_image(disp_resized_np_high)
 
         # name_dest_im = os.path.join(output_directory, "{}_disp.jpeg".format(output_name))
         # im.save(name_dest_im)
@@ -208,7 +207,16 @@ class PointCloudEstimator:
         # print("   Processed {:d} of {:d} images - saved prediction to {}".format(
         #     idx + 1, len(paths), name_dest_im))
 
-            
+
+    def get_color_image(self, disp_resized_np):
+        vmax = np.percentile(disp_resized_np, 95)
+        normalizer = mpl.colors.Normalize(vmin=disp_resized_np.min(), vmax=vmax)
+        mapper = cm.ScalarMappable(norm=normalizer, cmap='magma')
+        colormapped_im = (mapper.to_rgba(disp_resized_np)[:, :, :3] * 255).astype(np.uint8)
+        # print('-> Done!')
+        # im = pil.fromarray(colormapped_im)
+        return colormapped_im
+
     def xyz_array_to_pointcloud2(self, points, stamp=None, frame_id=None):
         '''
         Create a sensor_msgs.PointCloud2 from an array
@@ -240,77 +248,88 @@ class PointCloudEstimator:
         mess = msg
 
     def callback(self, rgb_left, info_left, rgb_right, info_right):
+        
+       
+
         left_image = CvBridge().imgmsg_to_cv2(rgb_left, desired_encoding="rgb8")
+        print(left_image.shape)
         left_info_K = np.array(info_left.K).reshape([3, 3])
         left_info_D = np.array(info_left.D)
         # left_undist = cv2.undistort(left_image, left_info_K, left_info_D)
         
-        left_depth,dis_left = self.depth_map_estimation(left_image, False)
+        left_depth,dis_left, segment_high = self.depth_map_estimation(left_image, False)
+        print(left_depth.shape)
+        print(segment_high.shape)
         msg_frame = CvBridge().cv2_to_imgmsg(left_depth, encoding="rgb8")
         depth_img_left.publish(msg_frame)
-       
-        right_image = CvBridge().imgmsg_to_cv2(rgb_right, desired_encoding="rgb8")
-        right_info_K = np.array(info_right.K).reshape([3, 3])
-        right_info_D = np.array(info_right.D)
 
-        right_depth, dis_right = self.depth_map_estimation(left_image, True)
-        msg_frame = CvBridge().cv2_to_imgmsg(right_depth, encoding="rgb8")
+        msg_frame = CvBridge().cv2_to_imgmsg(segment_high, encoding="rgb8")
         depth_img_right.publish(msg_frame)
+        # depth_img_right.publish(msg_frame)
+       
+        # right_image = CvBridge().imgmsg_to_cv2(rgb_right, desired_encoding="rgb8")
+        # right_info_K = np.array(info_right.K).reshape([3, 3])
+        # right_info_D = np.array(info_right.D)
+
+        # right_depth, dis_right, gradient = self.depth_map_estimation(left_image, True)
+        # print(gradient.shape)
+        # msg_frame = CvBridge().cv2_to_imgmsg(right_depth, encoding="rgb8")
+        # depth_img_right.publish(msg_frame)
         # right_undist = cv2.undistort(right_image, right_info_K, right_info_D)
 
-        R = np.array(info_left.R).reshape([3, 3])
-        T = np.array(info_left.P).reshape([3, 4])[:,3]
+        # R = np.array(info_left.R).reshape([3, 3])
+        # T = np.array(info_left.P).reshape([3, 4])[:,3]
        
-        R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(
-            left_info_K, left_info_D,
-            right_info_K, right_info_D,
-            left_image.shape[:2],
-            R,
-            T, alpha=1.0)
+        # R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(
+        #     left_info_K, left_info_D,
+        #     right_info_K, right_info_D,
+        #     left_image.shape[:2],
+        #     R,
+        #     T, alpha=1.0)
         # print(dis_right.shape)
         # dis_img = cv2.cvtColor(dis_left, cv2.COLOR_RGB2BGR)
         # print(dis_left)
-        points_3D = cv2.reprojectImageTo3D(dis_left, Q)
-        # print(points_3D)
-        points_3D = np.array(points_3D)/10000.0
+        # points_3D = cv2.reprojectImageTo3D(dis_left, Q)
+        # # print(points_3D)
+        # points_3D = np.array(points_3D)/10000.0
 
         print("Message")
-        try:
-            transform = tf_buffer.lookup_transform("velo_link","camera_color_left", #source frame
-                                    rospy.Time(0), #get the tf at first available time
-                                    rospy.Duration(1.0))
-            points = self.xyz_array_to_pointcloud2(points_3D, frame_id="velo_link", stamp=rospy.Time.now())
+        # try:
+        #     transform = tf_buffer.lookup_transform("velo_link","camera_color_left", #source frame
+        #                             rospy.Time(0), #get the tf at first available time
+        #                             rospy.Duration(1.0))
+        #     points = self.xyz_array_to_pointcloud2(points_3D, frame_id="velo_link", stamp=rospy.Time.now())
            
-            # quad = transform.transform.rotation
-            # print("before: ", quad)
-            # orientation_list = [quad.x, quad.y, quad.z, quad.w]
-            # (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
-            (roll, pitch, yaw) = ((120*(np.pi/180)), (0*(np.pi/180)), (90*(np.pi/180)))
-            # print (roll*(180.0/np.pi), pitch*(180.0/np.pi), yaw*(180.0/np.pi))
-            quat = quaternion_from_euler (roll, pitch,yaw)
-            # print("after: ", quat)
-            transform.transform.rotation.x = quat[0]
-            transform.transform.rotation.y = quat[1]
-            transform.transform.rotation.z = quat[2]
-            transform.transform.rotation.w = quat[3]
-            # transform = tf_buffer.lookup_transform("world","velo_link", #source frame
-            #                         rospy.Time(0), #get the tf at first available time
-            #                         rospy.Duration(1.0))
+        #     # quad = transform.transform.rotation
+        #     # print("before: ", quad)
+        #     # orientation_list = [quad.x, quad.y, quad.z, quad.w]
+        #     # (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
+        #     (roll, pitch, yaw) = ((120*(np.pi/180)), (0*(np.pi/180)), (90*(np.pi/180)))
+        #     # print (roll*(180.0/np.pi), pitch*(180.0/np.pi), yaw*(180.0/np.pi))
+        #     quat = quaternion_from_euler (roll, pitch,yaw)
+        #     # print("after: ", quat)
+        #     transform.transform.rotation.x = quat[0]
+        #     transform.transform.rotation.y = quat[1]
+        #     transform.transform.rotation.z = quat[2]
+        #     transform.transform.rotation.w = quat[3]
+        #     # transform = tf_buffer.lookup_transform("world","velo_link", #source frame
+        #     #                         rospy.Time(0), #get the tf at first available time
+        #     #                         rospy.Duration(1.0))
 
-            # cloud_out = do_transform_cloud(cloud_out, transform)
-             # print(transform.transform.rotation)
-            cloud_out = do_transform_cloud(points, transform)
-            point_cloud_left.publish(cloud_out)
+        #     # cloud_out = do_transform_cloud(cloud_out, transform)
+        #      # print(transform.transform.rotation)
+        #     cloud_out = do_transform_cloud(points, transform)
+        #     point_cloud_left.publish(cloud_out)
 
-            # points_3D = cv2.reprojectImageTo3D(dis_right, Q)
-            # # print(points_3D)
-            # points_3D = np.array(points_3D)/10000.0
+        #     # points_3D = cv2.reprojectImageTo3D(dis_right, Q)
+        #     # # print(points_3D)
+        #     # points_3D = np.array(points_3D)/10000.0
 
-            # points = self.xyz_array_to_pointcloud2(points_3D, frame_id="world", stamp=rospy.Time.now())
-            # point_cloud_right.publish(points)
-        except:
-            print ("error")
-            pass
+        #     # points = self.xyz_array_to_pointcloud2(points_3D, frame_id="world", stamp=rospy.Time.now())
+        #     # point_cloud_right.publish(points)
+        # except:
+        #     print ("error")
+        #     pass
         print("Transformed")
 
        

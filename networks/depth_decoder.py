@@ -15,13 +15,14 @@ from layers import *
 
 
 class DepthDecoder(nn.Module):
-    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_skips=True):
+    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_skips=True, is_scaled=False):
         super(DepthDecoder, self).__init__()
 
         self.num_output_channels = num_output_channels
         self.use_skips = use_skips
         self.upsample_mode = 'nearest'
         self.scales = scales
+        self.is_scaled = is_scaled
 
         self.num_ch_enc = num_ch_enc
         self.num_ch_dec = np.array([16, 32, 64, 128, 256])
@@ -62,4 +63,12 @@ class DepthDecoder(nn.Module):
             if i in self.scales:
                 self.outputs[("disp", i)] = self.sigmoid(self.convs[("dispconv", i)](x))
 
-        return self.outputs[("disp", 0)]
+
+        disp = self.outputs[("disp", 0)]
+        if(self.is_scaled):
+            scaled_disp, _ = disp_to_depth_scaled(disp, 0.1, 100, 4.4)
+        else:
+            scaled_disp, _ = disp_to_depth(disp, 0.1, 100)
+        # np.save(name_dest_npy, scaled_disp.cpu().numpy())
+
+        return scaled_disp
