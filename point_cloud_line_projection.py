@@ -49,6 +49,7 @@ import ros_numpy
 from saliency import BackPropagation
 import uuid
 
+import ros_numpy
 
 buffer = collections.deque(maxlen=5)
 
@@ -58,12 +59,32 @@ focal_length_right = 800
 is_set_camera_info=False
 
 
+
 class PoseEstimator:
     def __init__(self):
         self.image_path = ""
+        self.left_info_K = None 
+        self.left_info_D = None 
+        self.depth_map = None
+        self.R = None
+        self.T = None
+        self.R_vector = None
 
     def handle_odometry(self, msg):
         mess = msg
+    
+    def camera_info_callback(self, info_left):
+        self.K = np.array(info_left.K).reshape([3, 3])
+        self.D = np.array(info_left.D)
+        self.R = np.array(info_left.R).reshape([3, 3])
+        self.T = np.array(info_left.P).reshape([3, 4])[:,3]
+        self.R_vector, _ = cv2.Rodrigues(self.R)
+        # print("================================||||||||")
+        # print(self.R_vector)
+    
+    def point_cloud_callback(self, point_cloud_left):
+        xyz_array = ros_numpy.point_cloud2.pointcloud2_to_xyz_array(point_cloud_left)
+        self.depth_map = xyz_array
 
     def callback(self, rgb_left):
         left_image = CvBridge().imgmsg_to_cv2(rgb_left, desired_encoding="rgb8")
@@ -86,12 +107,38 @@ class PoseEstimator:
 
 
         msg_frame = CvBridge().cv2_to_imgmsg(blank_image, encoding="rgb8")
-        # print(frame.shape)
+        # print(self.left_info_K)
+        # if(self.depth_map is not None):
+        # print("=================================================")
+        # print(self.depth_map)
+        # else:
+        #     print()
         depth_img_left.publish(msg_frame)
-        # left_info_K = np.array(info_left.K).reshape([3, 3])
-        # left_info_D = np.array(info_left.D)
-        # left_undist = cv2.undistort(left_image, left_info_K, left_info_D)
+
+        if(self.R_vector is not None):
+            # self.depth_map = np.array(self.depth_map, dtype=np.float)
+            if(self.depth_map is not None):
+                imgpts, _ = cv2.projectPoints(self.depth_map, self.R_vector, self.T, self.K, self.D)
+                # print("=================depth map================================")
+                image_projected = self._draw_cube(left_image, imgpts)
+                # print(image_projected)
+                msg_frame = CvBridge().cv2_to_imgmsg(image_projected, encoding="rgb8")
+                depth_img_projection.publish(msg_frame)
     
+    def _draw_cube(self, img, imgpts):
+        imgpts = np.int32(imgpts).reshape(-1, 2)
+
+        # draw floor
+        cv2.drawContours(img, [imgpts[:4]], -1, (0, 0, 0), 3)
+
+        # draw pillars
+        for i, j in zip(range(4), range(4, 8)):
+            cv2.line(img, tuple(imgpts[i]), tuple(imgpts[j]), (0), 3)
+
+        # draw roof
+        cv2.drawContours(img, [imgpts[4:8]], -1, (0, 0, 0), 3)
+        return img
+
     def region_of_interest(self, img, vertices):
         mask = np.zeros_like(img)
         #channel_count = img.shape[2]
@@ -145,17 +192,20 @@ if __name__ == '__main__':
 
     point_cloud_estimator = PoseEstimator()
 
-    image_sub_left = message_filters.Subscriber('/r200/depth/image_raw', Image)
+    image_sub_left = message_filters.Subscriber('/inno_drone/down_camera/image_raw', Image)
     info_sub_left = message_filters.Subscriber('/r200/depth/camera_info', CameraInfo)
     depth_sub_left = message_filters.Subscriber('/r200/depth/points', PointCloud2)
     # point_cloud_left = rospy.Publisher('/depth/point_cloud_left', PointCloud2, queue_size=10)
     # point_cloud_right = rospy.Publisher('/depth/point_cloud_right', PointCloud2, queue_size=10)
-    ts = message_filters.ApproximateTimeSynchronizer([image_sub_left, info_sub_left, depth_sub_left], 10, 0.2)
-    ts.registerCallback(point_cloud_estimator.callback)
-        # print(frame.shape)
-    # rospy.Subscriber('/inno_drone/down_camera/image_raw', Image, point_cloud_estimator.callback)
+    # ts = message_filters.ApproximateTimeSynchronizer([image_sub_left, info_sub_left, depth_sub_left], 10, 0.2)
+    # ts.registerCallback(point_cloud_estimator.callback)
+    # print(frame.shape)
+    rospy.Subscriber('/inno_drone/down_camera/image_raw', Image, point_cloud_estimator.callback)
+    rospy.Subscriber('/r200/depth/camera_info', CameraInfo, point_cloud_estimator.camera_info_callback)
+    rospy.Subscriber('/r200/depth/points', PointCloud2, point_cloud_estimator.point_cloud_callback)
     # depth_img_right = rospy.Publisher('/depth/img_right', Image, queue_size=10)
     depth_img_left = rospy.Publisher('/depth/img_left', Image, queue_size=10)
+    depth_img_projection = rospy.Publisher('/depth/img_left_depth_projection', Image, queue_size=10)
 
     # rospy.Subscriber('/kitti/oxts/imu/', Imu, point_cloud_estimator.handle_odometry)
 
