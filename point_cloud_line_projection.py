@@ -145,14 +145,15 @@ if __name__ == '__main__':
 
     point_cloud_estimator = PoseEstimator()
 
-    image_sub_left = message_filters.Subscriber('/inno_drone/down_camera/image_raw', Image)
-    info_sub_left = message_filters.Subscriber('/inno_drone/down_camera/camera_info', CameraInfo)
+    image_sub_left = message_filters.Subscriber('/r200/depth/image_raw', Image)
+    info_sub_left = message_filters.Subscriber('/r200/depth/camera_info', CameraInfo)
+    depth_sub_left = message_filters.Subscriber('/r200/depth/points', PointCloud2)
     # point_cloud_left = rospy.Publisher('/depth/point_cloud_left', PointCloud2, queue_size=10)
     # point_cloud_right = rospy.Publisher('/depth/point_cloud_right', PointCloud2, queue_size=10)
-    # ts = message_filters.ApproximateTimeSynchronizer([image_sub_left, info_sub_left], 10, 0.2)
-    # ts.registerCallback(point_cloud_estimator.callback)
+    ts = message_filters.ApproximateTimeSynchronizer([image_sub_left, info_sub_left, depth_sub_left], 10, 0.2)
+    ts.registerCallback(point_cloud_estimator.callback)
         # print(frame.shape)
-    rospy.Subscriber('/inno_drone/down_camera/image_raw', Image, point_cloud_estimator.callback)
+    # rospy.Subscriber('/inno_drone/down_camera/image_raw', Image, point_cloud_estimator.callback)
     # depth_img_right = rospy.Publisher('/depth/img_right', Image, queue_size=10)
     depth_img_left = rospy.Publisher('/depth/img_left', Image, queue_size=10)
 
