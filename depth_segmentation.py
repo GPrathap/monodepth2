@@ -145,14 +145,21 @@ class PoseEstimator:
                     # print(i,j)
                     index = i*rows_color+j
                     if(len(self.dempth_mapper[index]) >0 ):
-                        # print(len(self.dempth_mapper[index]))
-                        interested_points.append(self.dempth_mapper[index])
+                        # print(self.dempth_mapper[index])
+                        for pose in self.dempth_mapper[index]:
+                            interested_points.append(pose)
                 
-                interested_points = np.squeeze(np.array(interested_points))
+                interested_points = np.array(interested_points)
                 # interested_points = interested_points.flatten()   
                 # print("=================depth map================================")
                 print(interested_points.shape)
-                print(interested_points[0,:].max())
+                # print(interested_points[0][0])
+                # for i in range(0, interested_points.shape[0]):
+                #     for 
+                if(interested_points.shape[0]>1):
+                    print(interested_points[:,0].max())
+                    print(interested_points[:,1].max())
+                    print(interested_points[:,2].max())
                 # image_projected = self._draw_cube(left_image, imgpts)
                 # # print(image_projected)
                 # msg_frame = CvBridge().cv2_to_imgmsg(image_projected, encoding="rgb8")
