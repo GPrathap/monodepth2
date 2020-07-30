@@ -48,7 +48,7 @@ import std_msgs.msg
 import ros_numpy
 from saliency import BackPropagation
 import uuid
-
+from collections import defaultdict
 import ros_numpy
 
 buffer = collections.deque(maxlen=5)
@@ -69,6 +69,7 @@ class PoseEstimator:
         self.R = None
         self.T = None
         self.R_vector = None
+        self.dempth_mapper = defaultdict(list)
 
     def handle_odometry(self, msg):
         mess = msg
@@ -83,8 +84,10 @@ class PoseEstimator:
         # print(self.R_vector)
     
     def point_cloud_callback(self, point_cloud_left):
+        # print("---------")
         xyz_array = ros_numpy.point_cloud2.pointcloud2_to_xyz_array(point_cloud_left)
         self.depth_map = xyz_array
+        # print(self.depth_map.shape)
 
     def callback(self, rgb_left):
         left_image = CvBridge().imgmsg_to_cv2(rgb_left, desired_encoding="rgb8")
@@ -115,25 +118,58 @@ class PoseEstimator:
         #     print()
         depth_img_left.publish(msg_frame)
 
+        rows_color = left_image.shape[0]
+        # print(imgpts.shape)
         if(self.R_vector is not None):
             # self.depth_map = np.array(self.depth_map, dtype=np.float)
             if(self.depth_map is not None):
                 imgpts, _ = cv2.projectPoints(self.depth_map, self.R_vector, self.T, self.K, self.D)
+                imgpts = np.int32(imgpts).reshape(-1, 2)
+                print("=====================")
+                print(label_hue.shape)
+                print(left_image.shape)
+                self.dempth_mapper = defaultdict(list)
+                min_val = min(imgpts.shape[0], self.depth_map.shape[0])-20
+                for i in range(0, min_val):
+                    index = imgpts[i][0]*rows_color  + imgpts[i][1]
+                    depth_val = self.depth_map[i]
+                    # print(imgpts[i][0])
+                    # print(imgpts[i][1])
+                    # print("-----")
+                    self.dempth_mapper[index].append(depth_val)
+
+                interested_points = []
+                r, c = np.where(label_hue==0)
+                # print(self.dempth_mapper)
+                for i, j in zip(r, c):
+                    # print(i,j)
+                    index = i*rows_color+j
+                    if(len(self.dempth_mapper[index]) >0 ):
+                        # print(len(self.dempth_mapper[index]))
+                        interested_points.append(self.dempth_mapper[index])
+                
+                interested_points = np.squeeze(np.array(interested_points))
+                # interested_points = interested_points.flatten()   
                 # print("=================depth map================================")
-                image_projected = self._draw_cube(left_image, imgpts)
-                # print(image_projected)
-                msg_frame = CvBridge().cv2_to_imgmsg(image_projected, encoding="rgb8")
-                depth_img_projection.publish(msg_frame)
+                print(interested_points.shape)
+                print(interested_points[0,:].max())
+                # image_projected = self._draw_cube(left_image, imgpts)
+                # # print(image_projected)
+                # msg_frame = CvBridge().cv2_to_imgmsg(image_projected, encoding="rgb8")
+                # depth_img_projection.publish(msg_frame)
+                
+                # print(t.shape)
     
     def _draw_cube(self, img, imgpts):
         imgpts = np.int32(imgpts).reshape(-1, 2)
-
+        
+        print(imgpts)
         # draw floor
-        cv2.drawContours(img, [imgpts[:4]], -1, (0, 0, 0), 3)
+        cv2.drawContours(img, [imgpts[:]], -1, (0, 0, 0), 3)
 
         # draw pillars
-        for i, j in zip(range(4), range(4, 8)):
-            cv2.line(img, tuple(imgpts[i]), tuple(imgpts[j]), (0), 3)
+        # for i, j in zip(range(4), range(4, 8)):
+        #     cv2.line(img, tuple(imgpts[i]), tuple(imgpts[j]), (0), 3)
 
         # draw roof
         cv2.drawContours(img, [imgpts[4:8]], -1, (0, 0, 0), 3)
@@ -201,11 +237,11 @@ if __name__ == '__main__':
     # ts.registerCallback(point_cloud_estimator.callback)
     # print(frame.shape)
     rospy.Subscriber('/realsense_camera/color/image_raw', Image, point_cloud_estimator.callback)
-    # rospy.Subscriber('/depth_registered/camera_info', CameraInfo, point_cloud_estimator.camera_info_callback)
-    # rospy.Subscriber('/depth_registered/points', PointCloud2, point_cloud_estimator.point_cloud_callback)
+    rospy.Subscriber('/depth_registered/camera_info', CameraInfo, point_cloud_estimator.camera_info_callback)
+    rospy.Subscriber('/depth_registered/points', PointCloud2, point_cloud_estimator.point_cloud_callback)
     # depth_img_right = rospy.Publisher('/depth/img_right', Image, queue_size=10)
     depth_img_left = rospy.Publisher('/depth/img_left', Image, queue_size=10)
-    depth_img_projection = rospy.Publisher('/depth/img_left_depth_projection', Image, queue_size=10)
+    depth_img_projection = rospy.Publisher('/depth/img_left_deptch_projection', Image, queue_size=10)
 
     # rospy.Subscriber('/kitti/oxts/imu/', Imu, point_cloud_estimator.handle_odometry)
 
