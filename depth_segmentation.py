@@ -70,6 +70,7 @@ class PoseEstimator:
         self.T = None
         self.R_vector = None
         self.dempth_mapper = defaultdict(list)
+        self.allowed_off_set = 0.6
 
     def handle_odometry(self, msg):
         mess = msg
@@ -147,6 +148,8 @@ class PoseEstimator:
                     if(len(self.dempth_mapper[index]) >0 ):
                         # print(self.dempth_mapper[index])
                         for pose in self.dempth_mapper[index]:
+                            pose = pose.tolist()
+                            pose.append(index)
                             interested_points.append(pose)
                 
                 interested_points = np.array(interested_points)
@@ -156,10 +159,16 @@ class PoseEstimator:
                 # print(interested_points[0][0])
                 # for i in range(0, interested_points.shape[0]):
                 #     for 
+                filtered_points = None
                 if(interested_points.shape[0]>1):
                     print(interested_points[:,0].max())
                     print(interested_points[:,1].max())
                     print(interested_points[:,2].max())
+                    filtered_points = np.where(interested_points[:,2] <= interested_points[:,2].max()-self.allowed_off_set)
+                    filtered_points = interested_points[filtered_points]
+                if(filtered_points is not None):
+                    print(filtered_points.shape)
+                    print(interested_points.shape)
                 # image_projected = self._draw_cube(left_image, imgpts)
                 # # print(image_projected)
                 # msg_frame = CvBridge().cv2_to_imgmsg(image_projected, encoding="rgb8")
