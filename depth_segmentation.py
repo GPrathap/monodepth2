@@ -118,7 +118,6 @@ class PoseEstimator:
         # else:
         #     print()
         depth_img_left.publish(msg_frame)
-
         rows_color = left_image.shape[0]
         # print(imgpts.shape)
         if(self.R_vector is not None):
@@ -149,7 +148,8 @@ class PoseEstimator:
                         # print(self.dempth_mapper[index])
                         for pose in self.dempth_mapper[index]:
                             pose = pose.tolist()
-                            pose.append(index)
+                            pose.append(i)
+                            pose.append(j)
                             interested_points.append(pose)
                 
                 interested_points = np.array(interested_points)
@@ -165,10 +165,22 @@ class PoseEstimator:
                     print(interested_points[:,1].max())
                     print(interested_points[:,2].max())
                     filtered_points = np.where(interested_points[:,2] <= interested_points[:,2].max()-self.allowed_off_set)
-                    filtered_points = interested_points[filtered_points]
+                    filtered_points = interested_points[filtered_points][:,3:5]
                 if(filtered_points is not None):
                     print(filtered_points.shape)
-                    print(interested_points.shape)
+                    # print(filtered_points[:,1].max())
+                    blank_image = np.zeros((label_hue.shape[1], label_hue.shape[0], 3), dtype=np.uint8)
+                    # print(filtered_points[:,0].max())
+                    # print(filtered_points[:,1].max())
+                    # print(filtered_points.shape)
+                    filtered_points = filtered_points.astype(np.int)
+                    # ank_image[label_hue==0] = 255
+                    # print(filtered_points[0:5])
+                    blank_image[filtered_points] = 255
+                    msg_frame = CvBridge().cv2_to_imgmsg(blank_image, encoding="rgb8")
+                    depth_img_projection.publish(msg_frame)
+                    # print(filtered_points.shape)
+
                 # image_projected = self._draw_cube(left_image, imgpts)
                 # # print(image_projected)
                 # msg_frame = CvBridge().cv2_to_imgmsg(image_projected, encoding="rgb8")
