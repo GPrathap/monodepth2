@@ -58,8 +58,6 @@ focal_length_right = 800
 
 is_set_camera_info=False
 
-
-
 class PoseEstimator:
     def __init__(self):
         self.image_path = ""
@@ -70,7 +68,7 @@ class PoseEstimator:
         self.T = None
         self.R_vector = None
         self.dempth_mapper = defaultdict(list)
-        self.allowed_off_set = 0.6
+        self.allowed_off_set = 0.5
 
     def handle_odometry(self, msg):
         mess = msg
@@ -78,7 +76,10 @@ class PoseEstimator:
     def camera_info_callback(self, info_left):
         self.K = np.array(info_left.K).reshape([3, 3])
         self.D = np.array(info_left.D)
+        # print("--------------------")
+        # print(info_left.R)
         self.R = np.array(info_left.R).reshape([3, 3])
+        self.R = np.eye(3)
         self.T = np.array(info_left.P).reshape([3, 4])[:,3]
         self.R_vector, _ = cv2.Rodrigues(self.R)
         # print("================================||||||||")
@@ -91,7 +92,7 @@ class PoseEstimator:
         # print(self.depth_map.shape)
 
     def callback(self, rgb_left):
-        left_image = CvBridge().imgmsg_to_cv2(rgb_left, desired_encoding="rgb8")
+        left_image = CvBridge().imgmsg_to_cv2(rgb_left, desired_encoding="bgr8")
         # print(left_image.shape)
         # frame = self.process(left_image)
         frame = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY)
@@ -107,10 +108,21 @@ class PoseEstimator:
 
         blank_image = np.zeros((label_hue.shape[0], label_hue.shape[1], 3), dtype=np.uint8)
         # set bg label to black
-        blank_image[label_hue==0] = 255
+        # ffg = label_hue==0
+        # print(ffg[0])
+        # blank_image[label_hue==0] = 240
+        # blank_image[label_hue!=0] = 0
+        # blank_image.fill(120)
+        for k in range(0, label_hue.shape[0]):
+            for l in range(0, label_hue.shape[1]):
+                if(label_hue[k,l] == 0):
+                    blank_image[k,l].fill(255)
+                    # blank_image[k,l]
+                    # print("")
+                # else :
+                #     blank_image[k,l].fill(255)
 
-
-        msg_frame = CvBridge().cv2_to_imgmsg(blank_image, encoding="rgb8")
+        msg_frame = CvBridge().cv2_to_imgmsg(blank_image, encoding="bgr8")
         # print(self.left_info_K)
         # if(self.depth_map is not None):
         # print("=================================================")
@@ -118,90 +130,87 @@ class PoseEstimator:
         # else:
         #     print()
         depth_img_left.publish(msg_frame)
-        rows_color = left_image.shape[0]
-        # print(imgpts.shape)
-        if(self.R_vector is not None):
-            # self.depth_map = np.array(self.depth_map, dtype=np.float)
-            if(self.depth_map is not None):
-                imgpts, _ = cv2.projectPoints(self.depth_map, self.R_vector, self.T, self.K, self.D)
-                imgpts = np.int32(imgpts).reshape(-1, 2)
-                print("=====================")
-                print(label_hue.shape)
-                print(left_image.shape)
-                self.dempth_mapper = defaultdict(list)
-                min_val = min(imgpts.shape[0], self.depth_map.shape[0])-20
-                for i in range(0, min_val):
-                    index = imgpts[i][0]*rows_color  + imgpts[i][1]
-                    depth_val = self.depth_map[i]
-                    # print(imgpts[i][0])
-                    # print(imgpts[i][1])
-                    # print("-----")
-                    self.dempth_mapper[index].append(depth_val)
+        # rows_color = left_image.shape[0]
+        # # print(imgpts.shape)
+        # if(self.R_vector is not None):
+        #     # self.depth_map = np.array(self.depth_map, dtype=np.float)
+        #     if(self.depth_map is not None):
+        #         imgpts, _ = cv2.projectPoints(self.depth_map, self.R_vector, self.T, self.K, self.D)
+        #         imgpts = np.int32(imgpts).reshape(-1, 2)
+        #         print("=====================")
+        #         print(label_hue.shape)
+        #         print(left_image.shape)
+        #         self.dempth_mapper = defaultdict(list)
+        #         min_val = min(imgpts.shape[0], self.depth_map.shape[0])-20
+        #         for i in range(0, min_val):
+        #             index = imgpts[i][0]*rows_color  + imgpts[i][1]
+        #             depth_val = self.depth_map[i]
+        #             # print(imgpts[i][0])
+        #             # print(imgpts[i][1])
+        #             # print("-----")
+        #             self.dempth_mapper[index].append(depth_val)
 
-                interested_points = []
-                r, c = np.where(label_hue==0)
-                # print(self.dempth_mapper)
-                for i, j in zip(r, c):
-                    # print(i,j)
-                    index = i*rows_color+j
-                    if(len(self.dempth_mapper[index]) >0 ):
-                        # print(self.dempth_mapper[index])
-                        for pose in self.dempth_mapper[index]:
-                            pose = pose.tolist()
-                            pose.append(i)
-                            pose.append(j)
-                            interested_points.append(pose)
+        #         interested_points = []
+        #         r, c = np.where(label_hue==0)
+        #         check_pose = []
+        #         # print(self.dempth_mapper)
+        #         for i, j in zip(r, c):
+        #             # print(i,j)
+        #             index = i*rows_color+j
+        #             if(len(self.dempth_mapper[index]) >0 ):
+        #                 # print(self.dempth_mapper[index])
+        #                 for pose in self.dempth_mapper[index]:
+        #                     pose = pose.tolist()
+        #                     pose.append(i)
+        #                     pose.append(j)
+        #                     check_pose.append([i, j])
+        #                     # check_pose.append(j)
+        #                     interested_points.append(pose)
                 
-                interested_points = np.array(interested_points)
-                # interested_points = interested_points.flatten()   
-                # print("=================depth map================================")
-                print(interested_points.shape)
-                # print(interested_points[0][0])
-                # for i in range(0, interested_points.shape[0]):
-                #     for 
-                filtered_points = None
-                if(interested_points.shape[0]>1):
-                    print(interested_points[:,0].max())
-                    print(interested_points[:,1].max())
-                    print(interested_points[:,2].max())
-                    filtered_points = np.where(interested_points[:,2] <= interested_points[:,2].max()-self.allowed_off_set)
-                    filtered_points = interested_points[filtered_points][:,3:5]
-                if(filtered_points is not None):
-                    print(filtered_points.shape)
-                    # print(filtered_points[:,1].max())
-                    blank_image = np.zeros((label_hue.shape[1], label_hue.shape[0], 3), dtype=np.uint8)
-                    # print(filtered_points[:,0].max())
-                    # print(filtered_points[:,1].max())
-                    # print(filtered_points.shape)
-                    filtered_points = filtered_points.astype(np.int)
-                    # ank_image[label_hue==0] = 255
-                    # print(filtered_points[0:5])
-                    blank_image[filtered_points] = 255
-                    msg_frame = CvBridge().cv2_to_imgmsg(blank_image, encoding="rgb8")
-                    depth_img_projection.publish(msg_frame)
-                    # print(filtered_points.shape)
+        #         interested_points = np.array(interested_points)
+        #         # interested_points = interested_points.flatten()   
+        #         # print("=================depth map================================")
+        #         print(interested_points.shape)
+        #         # print(interested_points[0][0])
+        #         # for i in range(0, interested_points.shape[0]):
+        #         #     for 
+        #         filtered_points = None
+        #         if(interested_points.shape[0]>1):
+        #             print(interested_points[:,0].max())
+        #             print(interested_points[:,1].max())
+        #             print(interested_points[:,2].max())
+        #             # filtered_points = np.where(interested_points[:,2] <= interested_points[:,2].max()-self.allowed_off_set)
+        #             # filtered_points = interested_points[filtered_points][:,3:5]
+        #             filtered_points = interested_points[:,3:5]
+        #         if(filtered_points is not None):
+        #             print(filtered_points.shape)
+        #             # print(filtered_points[:,1].max())
+        #             blank_image = np.zeros((label_hue.shape[0], label_hue.shape[1], 3), dtype=np.uint8)
+        #             print("============================")
+        #             print(blank_image.shape)
+        #             # print(filtered_points[:,1].max())
+        #             # print(filtered_points.shape)
+        #             print("Camera parameters...")
+        #             print(self.K)
+        #             print(self.R)
+        #             print(self.T)
+        #             print(self.R_vector)
+        #             filtered_points = filtered_points.astype(np.int)
+        #             # ank_image[label_hue==0] = 255
+        #             # print(filtered_points[0:5])
+        #             check_pose = np.array(check_pose)
+        #             # print(check_pose)
+        #             # blank_image[filtered_points] = 255
+        #             # print(check_pose[:,0].max())
+        #             # print(check_pose[:,1].max())
+        #             # check_pose = np.array([[3,496], [34,67], [56,78]])
+        #             # print(check_pose)
+        #             for index in check_pose:
+        #                 blank_image[index[0], index[1]] = 255
+        #             msg_frame = CvBridge().cv2_to_imgmsg(blank_image, encoding="rgb8")
+        #             depth_img_projection.publish(msg_frame)
+        #             # print(filtered_points.shape)
 
-                # image_projected = self._draw_cube(left_image, imgpts)
-                # # print(image_projected)
-                # msg_frame = CvBridge().cv2_to_imgmsg(image_projected, encoding="rgb8")
-                # depth_img_projection.publish(msg_frame)
-                
-                # print(t.shape)
-    
-    def _draw_cube(self, img, imgpts):
-        imgpts = np.int32(imgpts).reshape(-1, 2)
-        
-        print(imgpts)
-        # draw floor
-        cv2.drawContours(img, [imgpts[:]], -1, (0, 0, 0), 3)
-
-        # draw pillars
-        # for i, j in zip(range(4), range(4, 8)):
-        #     cv2.line(img, tuple(imgpts[i]), tuple(imgpts[j]), (0), 3)
-
-        # draw roof
-        cv2.drawContours(img, [imgpts[4:8]], -1, (0, 0, 0), 3)
-        return img
 
     def region_of_interest(self, img, vertices):
         mask = np.zeros_like(img)
@@ -268,7 +277,7 @@ if __name__ == '__main__':
     rospy.Subscriber('/depth_registered/camera_info', CameraInfo, point_cloud_estimator.camera_info_callback)
     rospy.Subscriber('/depth_registered/points', PointCloud2, point_cloud_estimator.point_cloud_callback)
     # depth_img_right = rospy.Publisher('/depth/img_right', Image, queue_size=10)
-    depth_img_left = rospy.Publisher('/depth/img_left', Image, queue_size=10)
+    depth_img_left = rospy.Publisher('/depth/img_left_before', Image, queue_size=10)
     depth_img_projection = rospy.Publisher('/depth/img_left_deptch_projection', Image, queue_size=10)
 
     # rospy.Subscriber('/kitti/oxts/imu/', Imu, point_cloud_estimator.handle_odometry)
